@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-backend:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+        
+    - name: Restore dependencies
+      run: dotnet restore
+      working-directory: backend
+      
+    - name: Build
+      run: dotnet build --no-restore
+      working-directory: backend
+      
+    - name: Run tests
+      run: dotnet test --no-restore --verbosity normal
+      working-directory: backend
+
+  build-frontend:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: Install dependencies
+      run: npm install
+      working-directory: frontend
+      
+    - name: Build
+      run: npm run build
+      working-directory: frontend
+      
+    - name: Type check
+      run: npx tsc --noEmit
+      working-directory: frontend
+
+  test-conversion:
+    runs-on: ubuntu-latest
+    needs: build-backend
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+        
+    - name: Start backend
+      run: |
+        cd backend
+        dotnet run &
+        sleep 10
+        
+    - name: Run conversion tests
+      run: |
+        curl -s http://localhost:5000/api/test/conversion | python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        print(f'Total: {data[\"summary\"][\"total\"]}')
+        print(f'Passed: {data[\"summary\"][\"passed\"]}')
+        print(f'Failed: {data[\"summary\"][\"failed\"]}')
+        print(f'Pass Rate: {data[\"summary\"][\"passRate\"]}')
+        if data['summary']['failed'] > 0:
+            print('\\nFailed tests:')
+            for r in data['results']:
+                if not r['passed']:
+                    print(f'  - {r[\"name\"]}')
+            sys.exit(1)
+        "
